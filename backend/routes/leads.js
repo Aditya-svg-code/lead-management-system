@@ -3,7 +3,6 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const Lead = require('../models/Lead');
 
 const router = express.Router();
-
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 const generateLeadScore = async (leadInfo) => {
@@ -11,18 +10,27 @@ const generateLeadScore = async (leadInfo) => {
         const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
         const prompt = `
-        You are a lead scoring AI. Score the lead based on the following details:
+        You are a lead scoring AI for a real estate company. Score the lead based on the following details:
         - Name: ${leadInfo.name}
         - Email: ${leadInfo.email}
         - Phone: ${leadInfo.phone}
+        - Source: ${leadInfo.source}
         - Company: ${leadInfo.company || 'Not Provided'}
         - Industry: ${leadInfo.industry || 'Not Provided'}
         - Budget: ${leadInfo.budget || 'Not Provided'}
         - Timeline: ${leadInfo.timeline || 'Not Provided'}
         - Requirements: ${leadInfo.requirements || 'Not Provided'}
+        - Preferred Property Type: ${leadInfo.propertyType || 'Not Provided'}
+        - BHK: ${leadInfo.bhk || 'Not Provided'}
+        - Preferred Location: ${leadInfo.location || 'Not Provided'}
         
-        Score the lead from 1 to 100 based on the completeness and relevance of the information.
-        Provide a numeric score only.
+        Scoring Rules:
+        1. WhatsApp > Email > Web Form (Priority in scoring).
+        2. Higher budget leads get a higher score.
+        3. More information completeness increases the score.
+        4. Higher demand locations increase the score.
+
+        Everytime provide a numeric score only from 1 to 100.
         `;
 
         const result = await model.generateContent({
@@ -40,34 +48,33 @@ const generateLeadScore = async (leadInfo) => {
     }
 };
 
-// Create Lead API
+// Create/Update Lead API
 router.post('/', async (req, res) => {
     try {
-        const { name, email, phone, company, industry, budget, timeline, requirements } = req.body;
+        const { name, email, phone, source, company, industry, budget, timeline, requirements, propertyType, bhk, location } = req.body;
 
-        if (!name || !email || !phone) {
-            return res.status(400).json({ message: 'Name, Email, and Phone are required' });
+        if (!name || !email || !phone || !source) {
+            return res.status(400).json({ message: 'Name, Email, Phone, and Source are required' });
         }
 
-        const leadData = {
-            name,
-            email,
-            phone,
-            company,
-            industry,
-            budget,
-            timeline,
-            requirements,
-        };
+        const leadData = { name, email, phone, source, company, industry, budget, timeline, requirements, propertyType, bhk, location };
 
         const score = await generateLeadScore(leadData);
+
+        const existingLead = await Lead.findOne({ email });
+
+        if (existingLead) {
+            existingLead.set({ ...leadData, score });
+            await existingLead.save();
+            return res.status(200).json(existingLead);
+        }
 
         const newLead = new Lead({ ...leadData, score });
         await newLead.save();
 
         res.status(201).json(newLead);
     } catch (error) {
-        console.error('Error creating lead:', error.message);
+        console.error('Error creating/updating lead:', error.message);
         res.status(500).json({ message: 'Server error' });
     }
 });
